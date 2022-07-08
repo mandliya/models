@@ -296,6 +296,7 @@ def get_candidate_probs(
     return candidate_probs
 
 
+@tf.keras.utils.register_keras_serializable(package="merlin.models")
 class TensorInitializer(tf.keras.initializers.Initializer):
     """Initializer that returns a tensor (e.g. pre-trained
     embeddings) set in the constructor
@@ -329,7 +330,7 @@ class TensorInitializer(tf.keras.initializers.Initializer):
         return weights
 
     @classmethod
-    def from_dataset(cls, data: Union[Dataset, DataFrameType], **kwargs):
+    def from_dataset(cls, data: Union[Dataset, DataFrameType], **kwargs) -> "TensorInitializer":
         if hasattr(data, "to_ddf"):
             data = data.to_ddf().compute()
         embeddings = tf_utils.df_to_tensor(data)
@@ -337,7 +338,7 @@ class TensorInitializer(tf.keras.initializers.Initializer):
         return cls(weights=embeddings, **kwargs)
 
     def get_config(self):  # To support serialization
-        return {"weights": self._weights}
+        return {"weights": self._weights.numpy()}
 
 
 def call_layer(layer: tf.keras.layers.Layer, inputs, *args, **kwargs):
@@ -348,8 +349,11 @@ def call_layer(layer: tf.keras.layers.Layer, inputs, *args, **kwargs):
     filtered_kwargs = filter_kwargs(kwargs, layer, cascade_kwargs_if_possible=True)
 
     if not has_custom_call:
-        filtered_kwargs = filter_kwargs(
-            filtered_kwargs, layer.call, cascade_kwargs_if_possible=True
-        )
+        if isinstance(layer, tf.keras.layers.Lambda):
+            filtered_kwargs = filter_kwargs(kwargs, layer.function, cascade_kwargs_if_possible=True)
+        else:
+            filtered_kwargs = filter_kwargs(
+                filtered_kwargs, layer.call, cascade_kwargs_if_possible=True
+            )
 
     return layer(inputs, *args, **filtered_kwargs)
