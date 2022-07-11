@@ -75,6 +75,7 @@ class MultiOptimizer(tf.keras.optimizers.Optimizer):
           name: The optimizer name.
         """
         super().__init__(name=name)
+        self.name = name
         if not default_optimizer:
             raise ValueError("`default` can't be empty")
         if not optimizers_and_blocks:
@@ -121,20 +122,31 @@ class MultiOptimizer(tf.keras.optimizers.Optimizer):
 
     def get_config(self):
         config = dict()
+        config["optimizers_and_blocks"] = []
+        for optimizer, block in self.optimizers_and_blocks:
+            config["optimizers_and_blocks"].append(
+                (optimizer.get_config(), tf.keras.utils.serialize_keras_object(block))
+            )
         config = tf_utils.maybe_serialize_keras_objects(
             self,
             config,
-            ["default_optimizer", "optimizers_and_blocks"],
+            ["default_optimizer"],
         )
         config["name"] = self.name
         return config
 
     @classmethod
     def from_config(cls, config):
-        config = tf_utils.maybe_deserialize_keras_objects(
-            config, ["default_optimizer", "optimizers_and_blocks"]
-        )
-        return cls(**config)
+        optimizers_and_blocks = []
+        for optimizer, block in config["optimizers_and_blocks"]:
+            optimizers_and_blocks.append(
+                (
+                    tf.keras.optimizers.Optimizer.from_config(optimizer),
+                    tf.keras.layers.deserialize(block),
+                )
+            )
+        config = tf_utils.maybe_deserialize_keras_objects(config, ["default_optimizer"])
+        return cls(optimizers_and_blocks, **config)
 
     @property
     def iterations(self):
