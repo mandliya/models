@@ -16,6 +16,7 @@
 
 import tempfile
 
+import numpy as np
 import pytest
 import tensorflow as tf
 from tensorflow.test import TestCase
@@ -173,8 +174,7 @@ def test_categorical_one_hot_as_pre(ecommerce_data: Dataset, run_eagerly):
     ).connect(ml.MLPBlock([32]))
     model = ml.Model(body, ml.BinaryClassificationTask("click"))
 
-    model.compile(optimizer="adam", run_eagerly=run_eagerly)
-    testing_utils.model_test(model, ecommerce_data)
+    testing_utils.model_test(model, ecommerce_data, run_eagerly=run_eagerly)
 
 
 @pytest.mark.parametrize("run_eagerly", [True, False])
@@ -187,8 +187,7 @@ def test_categorical_one_hot_in_model(ecommerce_data: Dataset, run_eagerly):
     body = ParallelBlock(branches, is_input=True).connect(ml.MLPBlock([32]))
     model = ml.Model(body, ml.BinaryClassificationTask("click"))
 
-    model.compile(optimizer="adam", run_eagerly=run_eagerly)
-    testing_utils.model_test(model, ecommerce_data)
+    testing_utils.model_test(model, ecommerce_data, run_eagerly=run_eagerly)
 
 
 def test_popularity_logits_correct():
@@ -526,8 +525,7 @@ def test_hashedcross_as_pre(ecommerce_data: Dataset, run_eagerly):
     ).connect(ml.MLPBlock([64]))
     model = ml.Model(body, ml.BinaryClassificationTask("click"))
 
-    model.compile(optimizer="adam", run_eagerly=run_eagerly)
-    testing_utils.model_test(model, ecommerce_data)
+    testing_utils.model_test(model, ecommerce_data, run_eagerly=run_eagerly)
 
 
 @pytest.mark.parametrize("run_eagerly", [True, False])
@@ -540,5 +538,47 @@ def test_hashedcross_in_model(ecommerce_data: Dataset, run_eagerly):
     body = ParallelBlock(branches, is_input=True).connect(ml.MLPBlock([64]))
     model = ml.Model(body, ml.BinaryClassificationTask("click"))
 
-    model.compile(optimizer="adam", run_eagerly=run_eagerly)
-    testing_utils.model_test(model, ecommerce_data)
+    testing_utils.model_test(model, ecommerce_data, run_eagerly=run_eagerly)
+
+
+def test_category_encoding_different_input_different_output():
+    test_case = TestCase()
+    schema = Schema(
+        [
+            create_categorical_column("dense_feature", tags=[Tags.CATEGORICAL], num_items=4),
+            create_categorical_column("sparse_feature", tags=[Tags.CATEGORICAL], num_items=5),
+        ]
+    )
+    inputs = {}
+    inputs["dense_feature"] = tf.constant([[1, 2, 3], [3, 3, 0]])
+    inputs["sparse_feature"] = tf.sparse.from_dense(
+        np.array([[1, 2, 3, 0], [0, 3, 1, 0]], dtype=np.int64)
+    )
+
+    # 1. Sparse output
+    category_encoding = ml.CategoryEncoding(
+        schema=schema,
+        output_mode="count",
+        sparse=True,
+    )
+    outputs = category_encoding(inputs)
+
+    # The expected output["dense_feature"] should be (X for missing value):
+    # [[X, 1, 1, 1]
+    #  [1, X, X, 2]]
+    expected_indices_1 = [[0, 1], [0, 2], [0, 3], [1, 0], [1, 3]]
+    expected_values_1 = [1, 1, 1, 1, 2]
+    test_case.assertAllEqual(expected_values_1, outputs["dense_feature"].values)
+    test_case.assertAllEqual(expected_indices_1, outputs["dense_feature"].indices)
+
+    expected_indices_2 = [[0, 1], [0, 2], [0, 3], [1, 1], [1, 3]]
+    expected_values_2 = [1, 1, 1, 1, 1]
+    test_case.assertAllEqual(expected_values_2, outputs["sparse_feature"].values)
+    test_case.assertAllEqual(expected_indices_2, outputs["sparse_feature"].indices)
+    # 1. Dense output
+    category_encoding = ml.CategoryEncoding(
+        schema=schema,
+        output_mode="count",
+        sparse=False,
+    )
+    outputs = category_encoding(inputs)
